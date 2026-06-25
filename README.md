@@ -1,4 +1,4 @@
-# Detecção e Análise Inteligente de Resíduos (Edge AI + Groq LPU) ♻️🤖
+# Detecção e Análise Inteligente de Resíduos (Edge AI + Groq LPU)
 
 ## 📌 Visão Geral do Projeto
 
