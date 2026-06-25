@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detector de Resíduos — MediaPipe + Teachable Machine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Teachable Machine -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary: #f3f4f6;
+            --secondary-hover: #e5e7eb;
+            --secondary-text: #374151;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --border-radius: 20px;
+            --btn-radius: 10px;
+            --shadow-md: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -4px rgba(0,0,0,0.05);
+            --green: #16a34a;
+            --metal: #6366f1;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(at 0% 0%, hsla(217,100%,94%,1) 0, transparent 50%),
+                              radial-gradient(at 100% 100%, hsla(217,100%,94%,1) 0, transparent 50%);
+            color: var(--text-main);
+            display: flex; justify-content: center; align-items: flex-start;
+            min-height: 100vh; padding: 24px;
+        }
+        .card {
+            background: var(--card-bg); width: 100%; max-width: 640px;
+            border-radius: var(--border-radius); box-shadow: var(--shadow-md);
+            padding: 36px; border: 1px solid rgba(255,255,255,0.5);
+        }
+        .header { text-align: center; margin-bottom: 24px; }
+        .icon-wrapper {
+            display: inline-flex; justify-content: center; align-items: center;
+            width: 56px; height: 56px; background: #eff6ff; color: var(--primary);
+            border-radius: 16px; margin-bottom: 14px;
+        }
+        .header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.025em; }
+        .header p { color: var(--text-muted); font-size: 14px; }
+        .badges { display: flex; gap: 8px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+        .badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #eff6ff; color: var(--primary); }
+        .badge.green { background: #f0fdf4; color: var(--green); }
+        .badge.metal { background: #eef2ff; color: var(--metal); }
+
+        #status-bar { text-align: center; font-size: 13px; color: var(--text-muted); margin-bottom: 16px; min-height: 20px; }
+        #status-bar.loading { color: var(--primary); font-weight: 600; }
+        #status-bar.error   { color: #ef4444; font-weight: 600; }
+
+        .input-actions { display: flex; gap: 12px; margin-bottom: 20px; }
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 8px; padding: 11px 18px; font-size: 14px; font-weight: 600;
+            border: none; border-radius: var(--btn-radius); cursor: pointer;
+            transition: all 0.2s ease; width: 100%;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 6px -1px rgba(37,99,235,0.2); }
+        .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+        .btn-secondary { background: var(--secondary); color: var(--secondary-text); }
+        .btn-secondary:hover:not(:disabled) { background: var(--secondary-hover); }
+        .file-upload-wrapper { width: 100%; }
+
+        .media-container {
+            width: 100%; aspect-ratio: 4/3; background: #f1f5f9; border-radius: 12px;
+            overflow: hidden; position: relative; border: 2px dashed var(--border-color);
+            display: flex; justify-content: center; align-items: center; margin-bottom: 20px;
+        }
+        #webcam-video { display: none; width: 100%; height: 100%; object-fit: cover; }
+        #output-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: none; pointer-events: none;
+        }
+        .placeholder-state { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #94a3b8; }
+        .placeholder-state p { font-size: 14px; font-weight: 500; }
+
+        .results-container { background: #f8fafc; border-radius: 12px; padding: 18px; border: 1px solid var(--border-color); }
+        .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .results-header h2 { font-size: 15px; font-weight: 600; }
+        #detection-count { font-size: 12px; font-weight: 600; background: #eff6ff; color: var(--primary); padding: 2px 10px; border-radius: 999px; }
+        #detections-list { display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; }
+        .detection-item { display: flex; flex-direction: column; gap: 5px; }
+        .detection-info { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+        .det-label { display: flex; align-items: center; gap: 6px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .progress-track { width: 100%; height: 7px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+        .sub-label { font-size: 11px; color: var(--text-muted); }
+        .empty-state { text-align: center; color: #94a3b8; font-size: 13px; padding: 16px 0; }
+        .nav-link { text-align: center; margin-top: 20px; font-size: 13px; color: var(--text-muted); }
+        .nav-link a { color: var(--primary); text-decoration: none; font-weight: 500; }
+        .nav-link a:hover { text-decoration: underline; }
+        @media (max-width: 480px) { .input-actions { flex-direction: column; } .card { padding: 24px; } }
+    </style>
+</head>
+<body>
+<div class="card">
+    <header class="header">
+        <div class="icon-wrapper">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+        </div>
+        <h1>Classificador de Resíduos</h1>
+        <p>Detecção MediaPipe + Classificação Teachable Machine</p>
+        <div class="badges">
+            <span class="badge">MediaPipe · Google</span>
+            <span class="badge green">Vidro Verde</span>
+            <span class="badge metal">Metal</span>
+        </div>
+    </header>
+
+    <div id="status-bar" class="loading">⏳ Carregando modelos...</div>
+
+    <div class="input-actions">
+        <button id="webcam-btn" class="btn btn-primary" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+            Webcam ao Vivo
+        </button>
+        <div class="file-upload-wrapper">
+            <label for="image-upload" class="btn btn-secondary" id="upload-label" style="cursor:not-allowed;opacity:0.5;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Enviar Imagem
+            </label>
+            <input type="file" id="image-upload" accept="image/*" hidden disabled>
+        </div>
+    </div>
+
+    <div class="media-container">
+        <div id="placeholder" class="placeholder-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            <p>Aguardando modelos...</p>
+        </div>
+        <video id="webcam-video" autoplay playsinline muted></video>
+        <canvas id="output-canvas"></canvas>
+    </div>
+
+    <div class="results-container">
+        <div class="results-header">
+            <h2>Objetos Detectados</h2>
+            <span id="detection-count">0</span>
+        </div>
+        <div id="detections-list">
+            <p class="empty-state">Inicie a webcam ou envie uma imagem para começar.</p>
+        </div>
+    </div>
+
+    <p class="nav-link">← <a href="index.html">Voltar para o Classificador C1</a></p>
+</div>
+
+<script>
+// MediaPipe exports under the global `vision` namespace from vision_bundle.js
+const TM_MODEL_URL = './model/';
+
+const CLASS_COLORS = {
+    'Green glass': '#16a34a',
+    'Metal':       '#6366f1',
+    'Metal ':      '#6366f1',
+};
+function getClassColor(n) { return CLASS_COLORS[n] || '#2563eb'; }
+
+let mpDetector = null, tmModel = null;
+let isWebcamActive = false, animFrameId = null, videoStream = null;
+let lastDetections = [], isDetecting = false, lastDetectTime = 0;
+const DETECT_INTERVAL_MS = 800;
+
+const webcamBtn      = document.getElementById('webcam-btn');
+const imageUpload    = document.getElementById('image-upload');
+const uploadLabel    = document.getElementById('upload-label');
+const video          = document.getElementById('webcam-video');
+const canvas         = document.getElementById('output-canvas');
+const ctx            = canvas.getContext('2d');
+const placeholder    = document.getElementById('placeholder');
+const statusBar      = document.getElementById('status-bar');
+const detectionsList = document.getElementById('detections-list');
+const detectionCount = document.getElementById('detection-count');
+
+const cropCanvas = document.createElement('canvas');
+cropCanvas.width = cropCanvas.height = 224;
+const cropCtx = cropCanvas.getContext('2d');
+
+async function loadModels() {
+    try {
+        setStatus('loading', '⏳ Carregando MediaPipe...');
+        const { FilesetResolver, ObjectDetector } = await import(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs'
+        );
+        const visionFileset = await FilesetResolver.forVisionTasks(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+        );
+        mpDetector = await ObjectDetector.createFromOptions(visionFileset, {
+            baseOptions: {
+                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+                delegate: 'GPU'
+            },
+            scoreThreshold: 0.4,
+            runningMode: 'IMAGE',
+        });
+
+        setStatus('loading', '⏳ Carregando Teachable Machine...');
+        tmModel = await tmImage.load(TM_MODEL_URL + 'model.json', TM_MODEL_URL + 'metadata.json');
+
+        setStatus('', '✅ Prontos! Escolha webcam ou imagem.');
+        enableControls();
+        placeholder.querySelector('p').textContent = 'Nenhuma fonte selecionada';
+    } catch (e) {
+        console.error(e);
+        setStatus('error', '❌ Erro ao carregar modelos. Use Live Server no VS Code.');
+    }
+}
+
+function setStatus(cls, msg) { statusBar.className = cls; statusBar.textContent = msg; }
+function enableControls() {
+    webcamBtn.disabled = false;
+    imageUpload.disabled = false;
+    uploadLabel.style.cursor = 'pointer';
+    uploadLabel.style.opacity = '1';
+}
+
+webcamBtn.addEventListener('click', async () => {
+    if (isWebcamActive) stopWebcam(); else await startWebcam();
+});
+
+async function startWebcam() {
+    try {
+        // Troca para modo VIDEO (mais eficiente para webcam)
+        await mpDetector.setOptions({ runningMode: 'VIDEO' });
+
+        videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+        video.srcObject = videoStream;
+        await new Promise((res, rej) => { video.oncanplay = res; video.onerror = rej; });
+        await video.play();
+
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+
+        video.style.display  = 'block';
+        canvas.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        isWebcamActive = true;
+        webcamBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg> Parar Webcam`;
+        webcamBtn.classList.replace('btn-primary', 'btn-secondary');
+        setStatus('', '🎥 Detectando em tempo real...');
+        webcamLoop();
+    } catch(e) {
+        console.error(e);
+        alert('Não foi possível acessar a câmera.');
+    }
+}
+
+async function stopWebcam() {
+    isWebcamActive = false;
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+    if (videoStream) videoStream.getTracks().forEach(t => t.stop());
+    video.style.display = canvas.style.display = 'none';
+    placeholder.style.display = 'flex';
+    webcamBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg> Webcam ao Vivo`;
+    webcamBtn.classList.replace('btn-secondary', 'btn-primary');
+    // Volta para modo IMAGE
+    await mpDetector.setOptions({ runningMode: 'IMAGE' });
+    setStatus('', '✅ Prontos! Escolha webcam ou imagem.');
+    clearDetections();
+}
+
+function webcamLoop() {
+    if (!isWebcamActive) return;
+
+    if (video.videoWidth && canvas.width !== video.videoWidth) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+    }
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    drawBoxes(lastDetections);
+
+    const now = performance.now();
+    if (!isDetecting && (now - lastDetectTime) > DETECT_INTERVAL_MS) {
+        isDetecting = true;
+        lastDetectTime = now;
+        runDetection(video, now).then(results => {
+            lastDetections = results;
+            renderList(results);
+            isDetecting = false;
+        }).catch(() => { isDetecting = false; });
+    }
+
+    animFrameId = requestAnimationFrame(webcamLoop);
+}
+
+imageUpload.addEventListener('change', async (e) => {
+    if (isWebcamActive) await stopWebcam();
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = async () => {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.drawImage(img, 0, 0);
+        canvas.style.display = 'block';
+        video.style.display = 'none';
+        placeholder.style.display = 'none';
+        setStatus('loading', '🔍 Analisando imagem...');
+        const results = await runDetection(img, performance.now());
+        ctx.drawImage(img, 0, 0);
+        drawBoxes(results);
+        renderList(results);
+        setStatus('', `✅ ${results.length} objeto(s) detectado(s).`);
+    };
+    img.src = URL.createObjectURL(file);
+});
+
+async function runDetection(source, timestamp) {
+    // MediaPipe detecção
+    let mpResults;
+    if (source instanceof HTMLVideoElement) {
+        mpResults = mpDetector.detectForVideo(source, timestamp);
+    } else {
+        mpResults = mpDetector.detect(source);
+    }
+
+    const detections = mpResults.detections || [];
+    const results = [];
+
+    const srcW = source.videoWidth  || source.naturalWidth  || canvas.width;
+    const srcH = source.videoHeight || source.naturalHeight || canvas.height;
+
+    for (const det of detections) {
+        const bb = det.boundingBox;
+        const x = bb.originX, y = bb.originY, w = bb.width, h = bb.height;
+        const mpClass = det.categories[0]?.categoryName || 'objeto';
+        const mpScore = det.categories[0]?.score || 0;
+
+        // Recorta e classifica com Teachable Machine
+        cropCtx.drawImage(source, x, y, w, h, 0, 0, 224, 224);
+        const tmPreds = await tmModel.predict(cropCanvas);
+        const best = tmPreds.reduce((a, b) => a.probability > b.probability ? a : b);
+
+        // Só mostra se TM tiver >= 75% de certeza (evita falsos positivos)
+        if (best.probability >= 0.75) {
+            results.push({
+                mpClass, mpScore,
+                tmClass: best.className.trim(),
+                tmPct:   best.probability,
+                bbox:    [x, y, w, h],
+            });
+        }
+    }
+
+    // Fallback: classifica imagem toda se MediaPipe não detectou nada
+    if (detections.length === 0) {
+        const tmPreds = await tmModel.predict(source);
+        const best = tmPreds.reduce((a, b) => a.probability > b.probability ? a : b);
+        if (best.probability > 0.6) {
+            results.push({
+                mpClass: 'objeto',
+                mpScore: 1,
+                tmClass: best.className.trim(),
+                tmPct:   best.probability,
+                bbox:    [srcW * 0.1, srcH * 0.1, srcW * 0.8, srcH * 0.8],
+            });
+        }
+    }
+
+    // --- GERADOR DE JSON PARA A C3 ---
+    if (results.length > 0) {
+        const pacoteC3 = {
+            timestamp: new Date().toISOString(),
+            hardware_inferencia: "Edge Computing (Navegador)",
+            limiar_confianca_configurado: 0.75,
+            objetos_detectados: results.map(r => ({
+                classe: r.tmClass,
+                probabilidade_confianca: parseFloat(r.tmPct.toFixed(2)),
+                bbox: { x: Math.round(r.bbox[0]), y: Math.round(r.bbox[1]), w: Math.round(r.bbox[2]), h: Math.round(r.bbox[3]) }
+            }))
+        };
+        console.log("JSON PARA A C3:\n", JSON.stringify(pacoteC3, null, 2));
+    }
+    // ---------------------------------
+
+    return results;
+}
+
+
+function drawBoxes(results) {
+    results.forEach(r => {
+        const [x, y, w, h] = r.bbox;
+        const color = getClassColor(r.tmClass);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(2, canvas.width * 0.004);
+        ctx.strokeRect(x, y, w, h);
+        const fontSize = Math.max(13, canvas.width * 0.025);
+        ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+        const label = `${r.tmClass} ${(r.tmPct * 100).toFixed(0)}%`;
+        const tw = ctx.measureText(label).width;
+        const th = fontSize + 8;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y - th, tw + 12, th);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, x + 6, y - 5);
+    });
+}
+
+function renderList(results) {
+    detectionCount.textContent = results.length;
+    if (results.length === 0) {
+        detectionsList.innerHTML = '<p class="empty-state">Nenhum objeto detectado.</p>';
+        return;
+    }
+    detectionsList.innerHTML = results.map(r => {
+        const color = getClassColor(r.tmClass);
+        const pct = (r.tmPct * 100).toFixed(1);
+        return `<div class="detection-item">
+            <div class="detection-info">
+                <span class="det-label"><span class="dot" style="background:${color}"></span>${r.tmClass}</span>
+                <span style="color:var(--text-muted)">${pct}%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:${color};"></div></div>
+            <span class="sub-label">MediaPipe detectou: ${r.mpClass} (${(r.mpScore*100).toFixed(0)}%)</span>
+        </div>`;
+    }).join('');
+}
+
+function clearDetections() {
+    detectionCount.textContent = '0';
+    detectionsList.innerHTML = '<p class="empty-state">Inicie a webcam ou envie uma imagem para começar.</p>';
+}
+
+window.addEventListener('DOMContentLoaded', loadModels);
+</script>
+</body>
+</html>
